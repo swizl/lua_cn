@@ -6,6 +6,7 @@
 
 #define llex_c
 #define LUA_CORE
+#define CJKV_SUPPORT
 
 #include "lprefix.h"
 
@@ -47,6 +48,14 @@ static const char *const luaX_tokens [] = {
     "<number>", "<integer>", "<name>", "<string>"
 };
 
+#if defined(CJKV_SUPPORT)
+static const char *const luaX_cn_tokens [] = {
+	"与", "跳出", "运行", "另", "另如",
+	"结束", "假", "对于", "方法", "跳转", "如",
+	"中", "本地", "无", "非", "或", "重复",
+	"返回", "则", "真", "直到", "每当"
+};
+#endif
 
 #define save_and_next(ls) (save(ls, ls->current), next(ls))
 
@@ -76,6 +85,13 @@ void luaX_init (lua_State *L) {
     luaC_fix(L, obj2gco(ts));  /* reserved words are never collected */
     ts->extra = cast_byte(i+1);  /* reserved word */
   }
+#if defined(CJKV_SUPPORT)
+  for (i=0; i<NUM_RESERVED; i++) {
+	TString *ts = luaS_new(L, luaX_cn_tokens[i]);
+	luaC_fix(L, obj2gco(ts));  /* reserved words are never collected */
+	ts->extra = cast_byte(i+1);  /* reserved word */
+  }
+#endif
 }
 
 
@@ -425,6 +441,131 @@ static void read_string (LexState *ls, int del, SemInfo *seminfo) {
                                    luaZ_bufflen(ls->buff) - 2);
 }
 
+#if defined(CJKV_SUPPORT)
+#if 0
+#define isChineseCode(charint) (charint > 0x80)
+int llex_default_func(LexState *ls, SemInfo *seminfo)
+{
+	if (lislalpha(ls->current) || isChineseCode(ls->current))
+	{
+		TString *ts;
+		do {
+			save_and_next(ls);
+			if (isChineseCode(ls->current))
+			{
+				save_and_next(ls);
+			}
+		} while (lislalnum(ls->current) || isChineseCode(ls->current));
+		ts = luaX_newstring(ls, luaZ_buffer(ls->buff),
+							  luaZ_bufflen(ls->buff));
+		seminfo->ts = ts;
+		if (isreserved(ts))  /* reserved word? */
+			return ts->extra - 1 + FIRST_RESERVED;
+		else
+			return TK_NAME;
+	}
+	else {  /* single-char tokens (+ - / ...) */
+		int c = ls->current;
+		next(ls);
+		return c;
+	}
+}
+#else
+#define is1stGBKCode(charint) (charint > 0x80)
+#define is2ndGBKCode(charint) (charint >= 0x40)
+#define isUTF8payload(charint) ((charint & 192) == 128)
+#define isUTF8header1(charint) ((charint & 224) == 192)
+#define isUTF8header2(charint) ((charint & 240) == 224)
+#define isUTF8header3(charint) ((charint & 248) == 240)
+#define isUTF8header4(charint) ((charint & 252) == 248)
+#define isUTF8header5(charint) ((charint & 254) == 252)
+#define isUTF8header(charint) (isUTF8header1(charint) \
+							|| isUTF8header2(charint) \
+							|| isUTF8header3(charint) \
+							|| isUTF8header4(charint) \
+							|| isUTF8header5(charint))
+int llex_default_func(LexState *ls, SemInfo *seminfo)
+{
+	if (lislalpha(ls->current) || is1stGBKCode(ls->current) || isUTF8header(ls->current))
+	{
+		TString *ts;
+		do {
+			if (is1stGBKCode(ls->current))
+			{
+				save_and_next(ls);
+				if (is2ndGBKCode(ls->current))
+					save_and_next(ls);
+				//else
+					//break;
+			}
+			else if (isUTF8header1(ls->current))
+			{
+				save_and_next(ls);
+				if (isUTF8payload(ls->current))
+					save_and_next(ls);
+				//else
+					//break;
+			}
+			else if (isUTF8header2(ls->current))
+			{
+				int i = 0;
+				save_and_next(ls);
+				for (; i < 2; ++i)
+					if (isUTF8payload(ls->current))
+						save_and_next(ls);
+					//else
+						//break;
+			}
+			else if (isUTF8header3(ls->current))
+			{
+				int i = 0;
+				save_and_next(ls);
+				for (; i < 3; ++i)
+					if (isUTF8payload(ls->current))
+						save_and_next(ls);
+					//else
+						//break;
+			}
+			else if (isUTF8header4(ls->current))
+			{
+				int i = 0;
+				save_and_next(ls);
+				for (; i < 4; ++i)
+					if (isUTF8payload(ls->current))
+						save_and_next(ls);
+					//else
+						//break;
+			}
+			else if (isUTF8header5(ls->current))
+			{
+				int i = 0;
+				save_and_next(ls);
+				for (; i < 5; ++i)
+					if (isUTF8payload(ls->current))
+						save_and_next(ls);
+					//else
+						//break;
+			}
+			else
+				save_and_next(ls);
+		} while (lislalnum(ls->current) || is1stGBKCode(ls->current) || isUTF8header(ls->current));
+
+		ts = luaX_newstring(ls, luaZ_buffer(ls->buff),
+							  luaZ_bufflen(ls->buff));
+		seminfo->ts = ts;
+		if (isreserved(ts))  /* reserved word? */
+			return ts->extra - 1 + FIRST_RESERVED;
+		else
+			return TK_NAME;
+	}
+	else {  /* single-char tokens (+ - / ...) */
+		int c = ls->current;
+		next(ls);
+		return c;
+	}
+}
+#endif
+#endif
 
 static int llex (LexState *ls, SemInfo *seminfo) {
   luaZ_resetbuffer(ls->buff);
@@ -521,6 +662,9 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         return TK_EOS;
       }
       default: {
+#if defined(CJKV_SUPPORT)
+		return llex_default_func(ls, seminfo);
+#else
         if (lislalpha(ls->current)) {  /* identifier or reserved word? */
           TString *ts;
           do {
@@ -540,6 +684,7 @@ static int llex (LexState *ls, SemInfo *seminfo) {
           next(ls);
           return c;
         }
+#endif
       }
     }
   }

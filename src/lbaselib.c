@@ -20,6 +20,7 @@
 #include "lauxlib.h"
 #include "lualib.h"
 
+#define CJKV_SUPPORT
 
 static int luaB_print (lua_State *L) {
   int n = lua_gettop(L);  /* number of arguments */
@@ -476,6 +477,19 @@ static const luaL_Reg base_funcs[] = {
   {"tostring", luaB_tostring},
   {"type", luaB_type},
   {"xpcall", luaB_xpcall},
+#if defined(CJKV_SUPPORT)
+  {"执行文件", luaB_dofile},
+  {"加载文件", luaB_loadfile},
+  {"加载", luaB_load},
+#if defined(LUA_COMPAT_LOADSTRING)
+  {"加载字串", luaB_load},
+#endif
+  {"成对", luaB_pairs},
+  {"打印", luaB_print},
+  {"到数字", luaB_tonumber},
+  {"到字串", luaB_tostring},
+  {"类型", luaB_type},
+#endif
   /* placeholders */
   {"_G", NULL},
   {"_VERSION", NULL},
